@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+message Gesture {
+  enum Category {
+    None = 0;
+    Closed_Fist = 1;
+    Open_Palm = 2;
+    Pointing_Up = 3;
+    Thumb_Down = 4;
+    Thumb_Up = 5;
+    Victory = 6;
+    ILoveYou = 7;
+  }
+  enum Hand {
+    Left = 0;
+    Right = 1;
+  }
+  Category recognizedGesture = 1;
+  Hand recognizedHand = 2;
+}

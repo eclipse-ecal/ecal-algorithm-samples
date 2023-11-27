@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecal-algorithm-samples"
+license = {file = "LICENSE.txt"}
+version = "0.1.0"
+dependencies = [
+    "protobuf==3.20.0",
+    "mediapipe",
+    #"ecal5",
+    "datatypes_collection @ git+https://github.com/eclipse-ecal/protobuf-datatypes-collection@main"
+]
+
+[project.scripts]
+gesture_recognition = "gesture_recognition.main:main"
+image_segmentation  = "image_segmentation.main:main"
+#object_detection    = "object_detection.annotate_images:main"
+
+[tool.setuptools.package-data]
+gesture_recognition = [ "*.tflite", "*.task" ]
+image_segmentation  = [ "*.tflite", "*.task" ]
+#object_detection    = [ "*.tflite", "*.task" ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
