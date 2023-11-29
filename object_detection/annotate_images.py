@@ -25,11 +25,13 @@ import ecal.core.core as ecal_core
 from ecal.core.subscriber import ProtoSubscriber
 from ecal.core.publisher  import ProtoPublisher
 
-from foxglove.RawImage_pb2 import RawImage
-from foxglove.ImageAnnotations_pb2 import ImageAnnotations
-from foxglove.PointsAnnotation_pb2 import PointsAnnotation
-from foxglove.Point2_pb2 import Point2
-from foxglove.Color_pb2 import Color
+from ros.sensor_msgs.Image_pb2 import Image as ROSImage
+from ros.sensor_msgs.CompressedImage_pb2 import CompressedImage as ROSCompressedImage
+from ros.visualization_msgs.ImageMarker_pb2 import ImageMarker as ROSImageMarker
+from ros.visualization_msgs.ImageMarkerArray_pb2 import ImageMarkerArray as ROSImageMarkerArray
+from ros.geometry_msgs.Point_pb2 import Point as ROSPoint
+from ros.std_msgs.Time_pb2 import Time
+from ros.std_msgs.ColorRGBA_pb2 import ColorRGBA
 
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -40,32 +42,44 @@ import io
 
 import numpy as np
 
-def create_bounding_box(detection, timestamp) -> PointsAnnotation:
+def mediapip_image_from_ros_raw_image(image: ROSImage) -> mp.Image:
+  # create numpy array with imagedata in uint8 to make it usable for mediapipe
+  np_array = np.frombuffer(image.data, dtype=np.uint8)
+  np_array = np.reshape(np_array, newshape=(image.height, image.width, 3))
+
+  # mediapipe image created out of numpy array data
+  mp_image = mp.Image(
+   image_format=mp.ImageFormat.SRGB, data=np_array
+  )
+  return mp_image
+
+def create_bounding_box(detection, header) -> ROSImageMarker:
   bbox = detection.bounding_box
-  bounding_box = PointsAnnotation()
-  bounding_box.type = PointsAnnotation.LINE_LOOP
-  lower_left = Point2(x=bbox.origin_x, y=bbox.origin_y)
-  lower_right = Point2(x=bbox.origin_x + bbox.width, y=bbox.origin_y)
-  upper_right = Point2(x=bbox.origin_x + bbox.width, y=bbox.origin_y + bbox.height)
-  upper_left = Point2(x=bbox.origin_x, y=bbox.origin_y + bbox.height)
+  bounding_box = ROSImageMarker()
+  bounding_box.type = 3 #Polygon
+  lower_left = ROSPoint(x=bbox.origin_x, y=bbox.origin_y)
+  lower_right = ROSPoint(x=bbox.origin_x + bbox.width, y=bbox.origin_y)
+  upper_right = ROSPoint(x=bbox.origin_x + bbox.width, y=bbox.origin_y + bbox.height)
+  upper_left = ROSPoint(x=bbox.origin_x, y=bbox.origin_y + bbox.height)
   bounding_box.points.append(lower_left)
   bounding_box.points.append(lower_right)
   bounding_box.points.append(upper_right)
   bounding_box.points.append(upper_left)
-  bounding_box.thickness = 4
-  bounding_box.timestamp.FromMicroseconds(timestamp)
+  bounding_box.scale = 4
+  bounding_box.header.stamp.sec = header.stamp.sec
+  bounding_box.header.stamp.nsec = header.stamp.nsec
   bounding_box.outline_color.r = 1.0
   bounding_box.outline_color.g = 0.647
   bounding_box.outline_color.b = 0.0
   bounding_box.outline_color.a = 1.0
   return bounding_box
 
-def create_annotations(detection_result, timestamp) -> ImageAnnotations:
-  annotations = ImageAnnotations()
+def create_annotations(detection_result, timestamp) -> ROSImageMarkerArray:
+  annotations = ROSImageMarkerArray()
   for detection in detection_result.detections:
     if (detection.categories[0].category_name == "car"):
       bounding_box = create_bounding_box(detection, timestamp)
-      annotations.points.append(bounding_box)
+      annotations.markers.append(bounding_box)
   return annotations
 
 class ImageClassifier(object):
@@ -75,12 +89,13 @@ class ImageClassifier(object):
     ObjectDetector = mp.tasks.vision.ObjectDetector
     ObjectDetectorOptions = mp.tasks.vision.ObjectDetectorOptions
     VisionRunningMode = mp.tasks.vision.RunningMode
-      
+
+    model_path = os.path.join(os.path.dirname(__file__), 'efficientdet_lite0.tflite')
+
     self.options = ObjectDetectorOptions(
-      base_options=BaseOptions(model_asset_path='./efficientdet_lite0.tflite'),
+      base_options=BaseOptions(model_asset_path=model_path),
       running_mode=VisionRunningMode.VIDEO,
       max_results=15
-      #result_callback=print_result
     )
     self.detector = ObjectDetector.create_from_options(self.options)
 
@@ -88,7 +103,7 @@ class ImageClassifier(object):
     ObjectDetector = mp.tasks.vision.ObjectDetector
     self.detector = ObjectDetector.create_from_options(self.options)
 
-def main(args):
+def main():
   args = parse_arguments()
   
   # print eCAL version and date
@@ -101,9 +116,8 @@ def main(args):
   ecal_core.set_process_state(1, 1, "I feel good")
 
   # create subscriber and connect callback
-  sub = ProtoSubscriber(args.input, RawImage)
-  #sub.set_callback(callback)
-  pub = ProtoPublisher(args.output, ImageAnnotations)
+  sub = ProtoSubscriber(args.input, ROSImage)
+  pub = ProtoPublisher(args.output, ROSImageMarkerArray)
   
   classifier = ImageClassifier()
   last_time = 0
@@ -117,15 +131,11 @@ def main(args):
 
       last_time = time
 
-      np_array = np.frombuffer(image.data, dtype=np.uint8)
-      np_array = np.reshape(np_array, newshape=(image.height, image.width, 3))
-
-      mp_image = mp.Image(
-        image_format=mp.ImageFormat.SRGB, data=np_array)
+      mp_image = mediapip_image_from_ros_raw_image(image)
        
       detection_result = classifier.detector.detect_for_video(mp_image, time)
 
-      annotations = create_annotations(detection_result, image.timestamp.ToMicroseconds())
+      annotations = create_annotations(detection_result, image.header)
       pub.send(annotations)
 
   ecal_core.finalize()
